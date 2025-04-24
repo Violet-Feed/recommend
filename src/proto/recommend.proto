@@ -1,0 +1,36 @@
+syntax = "proto3";
+package recommend;
+option java_multiple_files = true;
+option java_package = "violet.gateway.common.proto_gen.recommend";
+option go_package = "/proto_gen/recommend";
+
+import "common.proto";
+
+enum ReportType{
+  ReportType_Not_Use = 0;
+  Embedding = 1;
+  Search = 2;
+  HotSpot = 3;
+  Behavior = 4;
+}
+message ReportMessage{
+  ReportType report_type = 1;
+  string namespace = 2;
+  string key = 3;
+  repeated string texts = 4;
+  repeated string images = 5;
+  int64 user_id = 6;
+}
+
+message RecommendRequest{
+  string namespace = 1;
+  int64 user_id = 2;
+}
+message RecommendResponse{
+  repeated string keys = 1;
+  common.BaseResp baseResp = 255;
+}
+
+service RecommendService{
+  rpc Recommend(RecommendRequest) returns (RecommendResponse);
+}
