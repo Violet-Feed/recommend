@@ -1,4 +1,7 @@
-use tonic::{transport::Server, Request, Response, Status};
+mod handler;
+mod consumer;
+mod dal;
+mod hotspot;
 
 pub mod common {
     tonic::include_proto!("common");
@@ -7,7 +10,7 @@ pub mod recommend {
     tonic::include_proto!("recommend");
 }
 
-
+use tonic::{transport::Server, Request, Response, Status};
 use common::{BaseResp, StatusCode};
 use recommend::recommend_service_server::{RecommendService, RecommendServiceServer};
 use recommend::{RecommendRequest, RecommendResponse};
@@ -37,6 +40,17 @@ impl RecommendService for MyRecommendService {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::INFO)
+        .with_target(false)
+        .init();
+
+    tokio::spawn(async move {
+        if let Err(e) = consumer::rocketmq::start().await {
+            tracing::error!("[main] rocketmq consumer error. err = {}", e);
+        }
+    });
+    
     let addr = "127.0.0.1:3006".parse()?;
     let recommend_service = MyRecommendService::default();
     Server::builder()
