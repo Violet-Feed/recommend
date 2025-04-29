@@ -42,7 +42,6 @@ impl RecommendService for MyRecommendService {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::INFO)
-        .with_target(false)
         .init();
 
     tokio::spawn(async move {

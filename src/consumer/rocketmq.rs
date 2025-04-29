@@ -1,13 +1,19 @@
 use rocketmq::conf::{ClientOption, SimpleConsumerOption};
-use rocketmq::error::ClientError;
+use rocketmq::conf::LoggingFormat::Json;
 use rocketmq::model::common::{FilterExpression, FilterType};
 use rocketmq::SimpleConsumer;
 
-pub async fn start() -> Result<(), ClientError>{
+pub mod im{
+    tonic::include_proto!("im");
+}
+use im::MessageEvent;
+
+pub async fn start() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("[start] Starting rocketmq client");
     let mut consumer_option = SimpleConsumerOption::default();
     consumer_option.set_topics(vec!["conversation"]);
     consumer_option.set_consumer_group("test");
+    consumer_option.set_logging_format(Json);
     let mut client_option = ClientOption::default();
     client_option.set_access_url("localhost:8081");
     client_option.set_enable_tls(false);
@@ -15,7 +21,7 @@ pub async fn start() -> Result<(), ClientError>{
     let mut consumer = SimpleConsumer::new(consumer_option, client_option)?;
     if let Err(err) = consumer.start().await {
         tracing::error!("[start] simple consumer start err. err = {:?}", err);
-        return Err(err);
+        return Err(err.into());
     }
 
     loop {
@@ -27,7 +33,7 @@ pub async fn start() -> Result<(), ClientError>{
         }else{
             let messages = receive_result.unwrap();
             for message in messages {
-                match serde_json::from_slice::<serde_json::Value>(message.body()) {
+                match serde_json::from_slice::<MessageEvent>(message.body()) {
                     Ok(message) => {
                         tracing::info!("[start] receive message. message = {:?}",message);
                     }
