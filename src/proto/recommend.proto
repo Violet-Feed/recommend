@@ -14,7 +14,7 @@ enum ReportType{
   Behavior = 4;
 }
 message ReportMessage{
-  ReportType report_type = 1;
+  int32 report_type = 1;
   string namespace = 2;
   string key = 3;
   repeated string texts = 4;

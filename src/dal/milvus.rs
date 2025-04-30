@@ -1,104 +1,34 @@
-use std::collections::HashMap;
+use anyhow::Result;
 use milvus::client::Client;
-use milvus::collection::SearchOption;
+use milvus::collection::{Collection, SearchOption, SearchResult};
 use milvus::data::FieldColumn;
-use milvus::index::{IndexParams, IndexType};
-use milvus::schema::{CollectionSchemaBuilder, FieldSchema};
-use rand::Rng;
+use milvus::index::MetricType::IP;
+use tokio::sync::OnceCell;
 
-pub async fn init() ->Result<(), Box<dyn std::error::Error>> {
-    const URL: &str = "http://localhost:19530";
+const EVENT_COLLECTION_NAME: &str = "event";
+static EVENT_COLLECTION_CLIENT: OnceCell<Collection> = OnceCell::const_new();
 
-    let client = Client::new(URL).await?;
+async fn get_event_collection() -> &'static Collection {
+    EVENT_COLLECTION_CLIENT.get_or_init(|| async {
+            let client = Client::new("http://localhost:19530").await.expect("Failed to initialize milvus client");
+            let collection = client.get_collection(EVENT_COLLECTION_NAME).await.expect("Failed to get collection");
+            collection.load(1).await.expect("Failed to load collection");
+            collection
+        }).await
+}
 
-    let schema =
-        CollectionSchemaBuilder::new("hello_milvus", "a guide example for milvus rust SDK")
-            .add_field(FieldSchema::new_primary_int64(
-                "id",
-                "primary key field",
-                true,
-            ))
-            .add_field(FieldSchema::new_float_vector(
-                "embedding",
-                "feature field",
-                1024,
-            ))
-            .build()?;
-    let collection = client.create_collection(schema.clone(), None).await?;
-
-    // if let Err(err) = hello_milvus(&client, &schema).await {
-    //     println!("failed to run hello milvus: {:?}", err);
-    // }
-    if let Err(err) = hello_milvus(&client, "hello_milvus").await {
-        println!("failed to run hello milvus: {:?}", err);
-    }
-    collection.drop().await?;
-
+pub async fn store_event_embedding(event_name: &str, embedding_data: Vec<f32>) -> Result<()> {
+    let collection = get_event_collection().await;
+    let event_name_column = FieldColumn::new(collection.schema().get_field("event_name").unwrap(), vec![event_name.to_string()], );
+    let event_embedding_column = FieldColumn::new(collection.schema().get_field("event_embedding").unwrap(), embedding_data, );
+    collection.insert(vec![event_embedding_column, event_name_column], None).await?;
+    collection.flush().await?;
     Ok(())
 }
 
-// async fn hello_milvus(client: &Client, collection: &CollectionSchema) -> Result<(), Box<dyn std::error::Error>> {
-//     let mut embed_data = Vec::<f32>::new();
-//     for _ in 1..=256 * 1000 {
-//         let mut rng = rand::thread_rng();
-//         let embed = rng.r#gen();
-//         embed_data.push(embed);
-//     }
-//     let embed_column =
-//         FieldColumn::new(collection.get_field("embedding").unwrap(), embed_data);
-//
-//     client.insert(collection.name(), vec![embed_column], None).await?;
-//     client.flush(collection.name()).await?;
-//     let index_params = IndexParams::new(
-//         "feature_index".to_owned(),
-//         IndexType::IvfFlat,
-//         milvus::index::MetricType::L2,
-//         HashMap::from([("nlist".to_owned(), "32".to_owned())]),
-//     );
-//     client.create_index(collection.name(), "embedding", index_params).await?;
-//     client.load_collection(collection.name(), Some(LoadOptions::default())).await?;
-//
-//     let options = QueryOptions::default();
-//     let result = client.query(collection.name(), "id > 0", &options).await?;
-//
-//     tracing::info!("result num: {}",result.first().map(|c| c.len()).unwrap_or(0),);
-//
-//     Ok(())
-// }
-
-async fn hello_milvus(client: &Client, collection_name: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let mut embed_data = Vec::<f32>::new();
-    let mut rng = rand::rng();
-    for _ in 1..=1024 * 1000 {
-        let embed = rng.random();
-        embed_data.push(embed);
-    }
-    let collection = client.get_collection(collection_name).await?;
-    let embed_column =
-        FieldColumn::new(collection.schema().get_field("embedding").unwrap(), embed_data.clone());
-
-    collection.insert(vec![embed_column], None).await?;
-    collection.flush().await?;
-
-    let index_params = IndexParams::new(
-        "feature_index".to_owned(),
-        IndexType::IvfFlat,
-        milvus::index::MetricType::L2,
-        HashMap::from([("nlist".to_owned(), "32".to_owned())]),
-    );
-    collection.create_index("embedding", index_params).await?;
-    collection.load(1).await?;
-
-    let indexes = collection
-        .describe_index("embedding")
-        .await?;
-    let index= indexes.first().unwrap();
-
+pub async fn search_event_embedding<'a>(embedding: Vec<f32>) -> Result<Option<SearchResult<'a>>> {
+    let collection = get_event_collection().await;
     let options = SearchOption::default();
-    let results = collection.search::<&str, Vec<_>>(vec![embed_data.into()],"embedding",10,index.params().metric_type(),vec!["test"], &options).await?;
-
-    for result in &results {
-        tracing::info!("result: {:?}", result.size);
-    }
-    Ok(())
+    let results = collection.search(vec![embedding.into()], "event_embedding", 1, IP, vec!["event_name"], &options, ).await?;
+    Ok(results.into_iter().next())
 }
