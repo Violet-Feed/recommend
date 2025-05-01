@@ -2,7 +2,7 @@ use anyhow::Result;
 use serde_json::{json, Value};
 use std::env;
 
-pub async fn call_embedding_model(texts: &Vec<String>, images: &Vec<String>) -> Result<Vec<f32>> {
+pub async fn call_multi_embedding_model(texts: &Vec<String>, images: &Vec<String>, videos:&Vec<String>) -> Result<Vec<f32>> {
     let api_key = env::var("DASHSCOPE_API_KEY")?;
     let client = reqwest::Client::new();
 
@@ -11,9 +11,11 @@ pub async fn call_embedding_model(texts: &Vec<String>, images: &Vec<String>) -> 
     for text in texts {
         contents.push(json!({"text": text}));
     }
-
     for image in images {
         contents.push(json!({"image": image}));
+    }
+    for video in videos {
+        contents.push(json!({"video": video}));
     }
 
     let request_body = json!({

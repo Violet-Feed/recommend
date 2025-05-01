@@ -1,35 +1,47 @@
-use crate::dal::milvus::{search_event_embedding, store_event_embedding};
-use crate::dal::model::{call_event_embedding_model, call_event_model};
-use crate::recommend::ReportMessage;
+use crate::dal::milvus::{insert_event, recall_event, search_item};
+use crate::dal::model::{call_event_embedding_model, call_event_model, call_multi_embedding_model};
+use crate::recommend::SearchRequest;
 use anyhow::{Context, Result};
 use milvus::value::ValueVec;
 use crate::hotspot::commit_hotspot;
 
-pub async fn handle_search_report(message: ReportMessage) -> Result<()> {
-    let event = call_event_model(&message.key).await
-        .context("[handle_search_report] call_event_model err.")?;
-    tracing::info!("[handle_search_report] call_event_model. event = {:?}", event);
+pub async fn handle_search_request(req: SearchRequest) -> Result<String> {
+    let embedding = call_multi_embedding_model(&vec![req.keyword.clone()], &vec![], &vec![]).await
+        .context("[handle_search_request] call_multi_embedding_model err.")?;
+    let results=search_item(embedding, &req.keyword, req.page).await
+        .context("[handle_search_request] search_item err.")?;
+    tokio::spawn(async move {
+        if let Err(e) = report_keyword(&req.namespace, &req.keyword).await {
+            tracing::error!("[handle_search_request] report_keywords err: {:?}", e);
+        }
+    });
+    Ok(results)
+}
+
+async fn report_keyword(namespace: &str, keyword: &str) -> Result<()> {
+    let event = call_event_model(keyword).await
+        .context("[report_keyword] call_event_model err.")?;
+    tracing::info!("[report_keyword] call_event_model. event = {:?}", event);
 
     let embedding = call_event_embedding_model(&event).await
-        .context("[handle_search_report] call_event_embedding_model err.")?;
+        .context("[report_keyword] call_event_embedding_model err.")?;
 
-    if let Some(result) = search_event_embedding(embedding.clone()).await
-        .context("[handle_search_report] search_event_embedding err.")? {
+    if let Some(result) = recall_event(embedding.clone()).await
+        .context("[report_keyword] recall_event err.")? {
         let is_exist = result.score.first().copied().map_or(false, |score| score > 0.8);
         if is_exist {
             if let Some(ValueVec::String(event_name)) = result.field.first().map(|c| &c.value) {
                 if let Some(exist_event) = event_name.get(0).cloned() {
-                    commit_hotspot(&message.namespace, &exist_event).await?;
-                    tracing::info!("[handle_search_report] commit_hotspot exist event = {}", exist_event);
+                    commit_hotspot(namespace, &exist_event).await?;
+                    tracing::info!("[report_keyword] commit_hotspot exist event = {}", exist_event);
                     return Ok(());
                 }
             }
         }
     }
-
-    store_event_embedding(&event, embedding).await
-        .context("[handle_search_report] store_event_embedding err.")?;
-    commit_hotspot(&message.namespace, &event).await?;
-    tracing::info!("[handle_search_report] commit_hotspot new event = {}", event);
+    insert_event(&event, embedding).await
+        .context("[report_keyword] insert_event err.")?;
+    commit_hotspot(namespace, &event).await?;
+    tracing::info!("[report_keyword] commit_hotspot new event = {}", event);
     Ok(())
 }

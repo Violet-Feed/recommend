@@ -1,34 +1,186 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use milvus::client::Client;
 use milvus::collection::{Collection, SearchOption, SearchResult};
 use milvus::data::FieldColumn;
 use milvus::index::MetricType::IP;
+use serde_json::{json, Value};
 use tokio::sync::OnceCell;
 
-const EVENT_COLLECTION_NAME: &str = "event";
 static EVENT_COLLECTION_CLIENT: OnceCell<Collection> = OnceCell::const_new();
 
 async fn get_event_collection() -> &'static Collection {
     EVENT_COLLECTION_CLIENT.get_or_init(|| async {
-            let client = Client::new("http://localhost:19530").await.expect("Failed to initialize milvus client");
-            let collection = client.get_collection(EVENT_COLLECTION_NAME).await.expect("Failed to get collection");
-            collection.load(1).await.expect("Failed to load collection");
-            collection
-        }).await
+        let client = Client::new("http://localhost:19530").await.expect("Failed to initialize milvus client");
+        let collection = client.get_collection("event").await.expect("Failed to get event collection");
+        collection.load(1).await.expect("Failed to load event collection");
+        collection
+    }).await
 }
 
-pub async fn store_event_embedding(event_name: &str, embedding_data: Vec<f32>) -> Result<()> {
+pub async fn insert_event(event_name: &str, embedding_data: Vec<f32>) -> Result<()> {
     let collection = get_event_collection().await;
     let event_name_column = FieldColumn::new(collection.schema().get_field("event_name").unwrap(), vec![event_name.to_string()], );
-    let event_embedding_column = FieldColumn::new(collection.schema().get_field("event_embedding").unwrap(), embedding_data, );
+    let event_embedding_column = FieldColumn::new(collection.schema().get_field("event_embedding").unwrap(), embedding_data);
     collection.insert(vec![event_embedding_column, event_name_column], None).await?;
     collection.flush().await?;
     Ok(())
 }
-
-pub async fn search_event_embedding<'a>(embedding: Vec<f32>) -> Result<Option<SearchResult<'a>>> {
+pub async fn recall_event<'a>(embedding: Vec<f32>) -> Result<Option<SearchResult<'a>>> {
     let collection = get_event_collection().await;
     let options = SearchOption::default();
     let results = collection.search(vec![embedding.into()], "event_embedding", 1, IP, vec!["event_name"], &options, ).await?;
     Ok(results.into_iter().next())
+}
+
+pub async fn upsert_item(extra: &str, embedding_data: Vec<f32>) -> Result<()> {
+    let mut extra_obj: Value = serde_json::from_str(extra)
+        .context("[upsert_item] extra deserializing json err.")?;
+    let obj = extra_obj.as_object_mut()
+        .context("[upsert_item] extra deserializing json err.")?;
+    obj.insert("multi_embedding".to_string(), json!(embedding_data));
+
+    let data = vec![Value::Object(obj.to_owned())];
+    let body = json!({
+        "data": data,
+        "collectionName": "item"
+    });
+    let client = reqwest::Client::new();
+    let resp = client
+        .post("http://localhost:19530/v2/vectordb/entities/upsert")
+        .json(&body)
+        .send()
+        .await
+        .context("[upsert_item] send request err.")?;
+    let text = resp.text().await
+        .context("[upsert_item] get response err.")?;
+    tracing::info!("[upsert_item] {}", text);
+    Ok(())
+}
+pub async fn recall_item(embeddings: Vec<Vec<f32>>,step:i64) -> Result<String> {
+    let req: Vec<Value> = embeddings
+        .into_iter()
+        .map(|embedding| {
+            json!({
+                "data": [embedding],
+                "annsField": "multi_embedding",
+                "params": {
+                    "params": {
+                        "ef": 10
+                    }
+                },
+                "offset": (step - 1) * 10,
+                "limit": 10
+            })
+        })
+        .collect();
+    let body = json!({
+        "collectionName": "item",
+        "search": req,
+        "rerank": {
+            "strategy": "ws",
+            "params": {
+                "weights": [0.9,0.7,0.5,0.3,0.1],
+            }
+        },
+        "limit": 50,
+        "outputFields": [
+            "item_id",
+            "title",
+            "image"
+        ]
+    });
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post("http://localhost:19530/v2/vectordb/entities/advanced_search")
+        .json(&body)
+        .send()
+        .await
+        .context("[recall_item] send request err.")?;
+    let text = resp.text().await
+        .context("[recall_item] get response err.")?;
+    tracing::info!("[recall_item] {}", text);
+
+    let mut v: Value = serde_json::from_str(&text)
+        .context("[recall_item] serialize json err.")?;
+    let data = v.get_mut("data")
+        .and_then(|d| d.as_array_mut())
+        .ok_or_else(|| anyhow::anyhow!("no data field"))?;
+    for obj in data.iter_mut() {
+        if let Some(map) = obj.as_object_mut() {
+            map.remove("distance");
+            map.remove("id");
+        }
+    }
+    let result = serde_json::to_string(data)
+        .context("[recall_item] serialize json err.")?;
+    Ok(result)
+}
+pub async fn search_item(embedding: Vec<f32>, keyword: &str, page: i64) -> Result<String> {
+    let req = json!([
+        {
+            "data": [embedding],
+            "annsField": "multi_embedding",
+            "params": {
+                "params": {
+                    "ef": 10
+                }
+            },
+            "offset": (page - 1) * 10,
+            "limit": 10
+        },
+        {
+            "data": [keyword],
+            "annsField": "title_embeddings",
+            "params": {
+                "params": {
+                    "drop_ratio_build": 0.2
+                }
+            },
+            "offset": (page - 1) * 10,
+            "limit": 10
+        }
+    ]);
+    let body = json!({
+        "collectionName": "item",
+        "search": req,
+        "rerank": {
+            "strategy": "rrf",
+            "params": {
+                "k": 60
+            }
+        },
+        "limit": 20,
+        "outputFields": [
+            "item_id",
+            "title",
+            "image"
+        ]
+    });
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post("http://localhost:19530/v2/vectordb/entities/advanced_search")
+        .json(&body)
+        .send()
+        .await
+        .context("[search_item] send request err.")?;
+    let text = resp.text().await
+        .context("[search_item] get response err.")?;
+    tracing::info!("[search_item] {}", text);
+
+    let mut v: Value = serde_json::from_str(&text)
+        .context("[search_item] serialize json err.")?;
+    let data = v.get_mut("data")
+        .and_then(|d| d.as_array_mut())
+        .ok_or_else(|| anyhow::anyhow!("no data field"))?;
+    for obj in data.iter_mut() {
+        if let Some(map) = obj.as_object_mut() {
+            map.remove("distance");
+            map.remove("id");
+        }
+    }
+    let result = serde_json::to_string(data)
+        .context("[search_item] serialize json err.")?;
+    Ok(result)
 }

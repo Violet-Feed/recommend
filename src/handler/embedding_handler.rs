@@ -1,15 +1,19 @@
-use crate::dal::model::call_embedding_model;
-use crate::recommend::ReportMessage;
-//use crate::dal::milvus::{store_event_embedding, search_event_embedding};
+use crate::dal::model::call_multi_embedding_model;
+use crate::recommend::{EmbeddingReport};
 use anyhow::{Context, Result};
+use crate::dal::milvus::upsert_item;
 
-pub async fn handle_embedding_report(message: ReportMessage) -> Result<()> {
-    let embedding = call_embedding_model(&message.texts, &message.images).await
-        .context("[handle_embedding_report] call_embedding_model err.")?;
-
-    //store_event_embedding("event",&embedding).await.context("[handle_embedding_report] store_embedding err.")?;
-    //let results =search_event_embedding("event",&embedding).await.context("[handle_embedding_report] search_embedding err.")?;
-    //tracing::info!("[handle_embedding_report] search_embedding. results = {:?}", results.first().unwrap().size);
-    //if results.first().is_some_and(results.first().)
+pub async fn handle_embedding_report(namespace:&str, report: EmbeddingReport) -> Result<()> {
+    match namespace {
+        "item" => {
+            let embedding = call_multi_embedding_model(&report.texts, &report.images,&report.videos).await
+                .context("[handle_embedding_report] call_multi_embedding_model err.")?;
+            upsert_item(&report.extra, embedding).await
+                .context("[handle_embedding_report] upsert_item err.")?;
+        }
+        _ => {
+            tracing::error!("[handle_embedding_report] unknown namespace: {}", namespace);
+        }
+    }
     Ok(())
 }

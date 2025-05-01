@@ -1,7 +1,7 @@
 syntax = "proto3";
 package recommend;
 option java_multiple_files = true;
-option java_package = "violet.gateway.common.proto_gen.recommend";
+option java_package = "violet.market.common.proto_gen.recommend";
 option go_package = "/proto_gen/recommend";
 
 import "proto/common.proto";
@@ -9,17 +9,33 @@ import "proto/common.proto";
 enum ReportType{
   ReportType_Not_Use = 0;
   Embedding = 1;
-  Search = 2;
+  Behavior = 2;
   HotSpot = 3;
-  Behavior = 4;
+}
+
+message EmbeddingReport{
+  int32 opt_type = 1;
+  repeated string texts = 2;
+  repeated string images = 3;
+  repeated string videos = 4;
+  string extra = 5;
+}
+message BehaviorReport{
+  int64 user_id = 1;
+  int64 object_id=2;
+  int32 behavior_type = 3;
+  int64 behavior_time = 4;
+}
+message HotSpotReport{
+  string key=1;
+  int64 time=2;
 }
 message ReportMessage{
   int32 report_type = 1;
   string namespace = 2;
-  string key = 3;
-  repeated string texts = 4;
-  repeated string images = 5;
-  int64 user_id = 6;
+  EmbeddingReport embedding_report = 3;
+  BehaviorReport behavior_report = 4;
+  HotSpotReport hotspot_report = 5;
 }
 
 message RecommendRequest{
@@ -27,10 +43,21 @@ message RecommendRequest{
   int64 user_id = 2;
 }
 message RecommendResponse{
-  repeated string keys = 1;
+  string results = 1;
+  common.BaseResp baseResp = 255;
+}
+
+message SearchRequest{
+  string namespace = 1;
+  string keyword = 2;
+  int64 page = 3;
+}
+message SearchResponse{
+  string results = 1;
   common.BaseResp baseResp = 255;
 }
 
 service RecommendService{
   rpc Recommend(RecommendRequest) returns (RecommendResponse);
+  rpc Search(SearchRequest) returns (SearchResponse);
 }

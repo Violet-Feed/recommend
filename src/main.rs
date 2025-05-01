@@ -13,7 +13,10 @@ pub mod recommend {
 use common::{BaseResp, StatusCode};
 use recommend::recommend_service_server::{RecommendService, RecommendServiceServer};
 use recommend::{RecommendRequest, RecommendResponse};
+use recommend::{SearchRequest, SearchResponse};
 use tonic::{transport::Server, Request, Response, Status};
+use crate::handler::recommend_handler::handle_recommend_request;
+use crate::handler::search_handler::handle_search_request;
 
 #[derive(Debug, Default)]
 pub struct MyRecommendService {}
@@ -25,16 +28,47 @@ impl RecommendService for MyRecommendService {
         request: Request<RecommendRequest>,
     ) -> Result<Response<RecommendResponse>, Status> {
         let req = request.into_inner();
-        let keys = vec!["key1".to_string(), "key2".to_string()];
-        let base_resp = BaseResp {
-            status_code: StatusCode::Success as i32,
-            status_message: "Success".to_string(),
-        };
-        let response = RecommendResponse {
-            keys,
-            base_resp: Some(base_resp),
-        };
-        Ok(Response::new(response))
+        match handle_recommend_request(req).await{
+            Ok(results) => {
+                let base_resp = BaseResp {
+                    status_code: StatusCode::Success as i32,
+                    status_message: "Success".to_string(),
+                };
+                let response = RecommendResponse {
+                    results,
+                    base_resp: Some(base_resp),
+                };
+                Ok(Response::new(response))
+            }
+            Err(e) => {
+                tracing::error!("[recommend] handle_recommend_request err. err = {}", e);
+                Err(Status::internal(format!("Error: {}", e)))
+            }
+        }
+    }
+
+    async fn search(
+        &self,
+        request: Request<SearchRequest>,
+    ) -> Result<Response<SearchResponse>, Status> {
+        let req = request.into_inner();
+        match handle_search_request(req).await{
+            Ok(results) => {
+                let base_resp = BaseResp {
+                    status_code: StatusCode::Success as i32,
+                    status_message: "Success".to_string(),
+                };
+                let response = SearchResponse {
+                    results,
+                    base_resp: Some(base_resp),
+                };
+                Ok(Response::new(response))
+            }
+            Err(e) => {
+                tracing::error!("[search] handle_search_request err. err = {}", e);
+                Err(Status::internal(format!("Error: {}", e)))
+            }
+        }
     }
 }
 
@@ -45,7 +79,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     tokio::spawn(async move {
-        consumer::rocketmq::start().await;
+        consumer::start().await;
     });
 
     let addr = "127.0.0.1:3006".parse()?;
