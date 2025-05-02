@@ -1,6 +1,31 @@
 use crate::recommend::RecommendRequest;
-use anyhow::Result;
+use crate::dal::{redis, milvus};
+use anyhow::{Context, Result};
 
 pub async fn handle_recommend_request(req:RecommendRequest) -> Result<String> {
-    Ok("success".to_string())
+    let item_history = redis::get_user_history(req.user_id).await
+        .context("[handle_recommend_request] get_user_history err.")?;
+    let mut embeddings = milvus::get_item_embedding(item_history).await
+        .context("[handle_recommend_request] get_item_embedding err.")?;
+    while embeddings.len() < 6 {
+        embeddings.push(milvus::random_embedding());
+    }
+    let mut results = Vec::new();
+    let mut step =0;
+    while results.len()<20{
+        step+=1;
+        results=milvus::recall_item(embeddings.clone(),step).await
+            .context("[handle_recommend_request] recall_item err.")?;
+        if results.len() == 0 {
+            break;
+        }
+        results=redis::execute_impression(req.user_id,results).await
+            .context("[handle_recommend_request] execute_impression err.")?;
+    }
+    results.truncate(20);
+    redis::write_impression(req.user_id,results.clone()).await
+        .context("[handle_recommend_request] write_impression err.")?;
+    let result = serde_json::to_string(&results)
+        .context("[search_item] serialize json err.")?;
+    Ok(result)
 }

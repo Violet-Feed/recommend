@@ -3,6 +3,7 @@ use milvus::client::Client;
 use milvus::collection::{Collection, SearchOption, SearchResult};
 use milvus::data::FieldColumn;
 use milvus::index::MetricType::IP;
+use rand::Rng;
 use serde_json::{json, Value};
 use tokio::sync::OnceCell;
 
@@ -15,6 +16,11 @@ async fn get_event_collection() -> &'static Collection {
         collection.load(1).await.expect("Failed to load event collection");
         collection
     }).await
+}
+
+pub fn random_embedding() -> Vec<f32> {
+    let mut rng = rand::thread_rng();
+    (0..1024).map(|_| rng.gen_range(-0.05..0.05)).collect()
 }
 
 pub async fn insert_event(event_name: &str, embedding_data: Vec<f32>) -> Result<()> {
@@ -56,10 +62,47 @@ pub async fn upsert_item(extra: &str, embedding_data: Vec<f32>) -> Result<()> {
     tracing::info!("[upsert_item] {}", text);
     Ok(())
 }
-pub async fn recall_item(embeddings: Vec<Vec<f32>>,step:i64) -> Result<String> {
+pub async fn get_item_embedding(ids: Vec<i64>) -> Result<Vec<Vec<f32>>> {
+    let body = json!({
+        "collectionName": "item",
+        "id": ids,
+        "outputFields": ["multi_embedding"]
+    });
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post("http://localhost:19530/v2/vectordb/entities/get")
+        .json(&body)
+        .send()
+        .await
+        .context("[get_item_embedding] send request err.")?;
+
+    let text = resp.text().await
+        .context("[get_item_embedding] get response err.")?;
+    let v: Value = serde_json::from_str(&text)
+        .context("[get_item_embedding] parse json err.")?;
+
+    let data = v.get("data")
+        .and_then(|d| d.as_array())
+        .ok_or_else(|| anyhow::anyhow!("no data field"))?;
+
+    let mut embeddings = Vec::new();
+    for obj in data {
+        if let Some(embedding) = obj.get("multi_embedding").and_then(|e| e.as_array()) {
+            let vec: Vec<f32> = embedding.iter()
+                .filter_map(|x| x.as_f64().map(|f| f as f32))
+                .collect();
+            embeddings.push(vec);
+        }
+    }
+    Ok(embeddings)
+}
+pub async fn recall_item(embeddings: Vec<Vec<f32>>,step:i64) -> Result<Vec<Value>> {
+    let limits = [15, 12, 9, 6, 3, 5];
     let req: Vec<Value> = embeddings
         .into_iter()
-        .map(|embedding| {
+        .zip(limits.iter())
+        .map(|(embedding, &limit)| {
             json!({
                 "data": [embedding],
                 "annsField": "multi_embedding",
@@ -68,8 +111,8 @@ pub async fn recall_item(embeddings: Vec<Vec<f32>>,step:i64) -> Result<String> {
                         "ef": 10
                     }
                 },
-                "offset": (step - 1) * 10,
-                "limit": 10
+                "offset": (step - 1) * limit,
+                "limit": limit
             })
         })
         .collect();
@@ -77,9 +120,9 @@ pub async fn recall_item(embeddings: Vec<Vec<f32>>,step:i64) -> Result<String> {
         "collectionName": "item",
         "search": req,
         "rerank": {
-            "strategy": "ws",
+            "strategy": "rrf",
             "params": {
-                "weights": [0.9,0.7,0.5,0.3,0.1],
+                "k": 60
             }
         },
         "limit": 50,
@@ -112,11 +155,9 @@ pub async fn recall_item(embeddings: Vec<Vec<f32>>,step:i64) -> Result<String> {
             map.remove("id");
         }
     }
-    let result = serde_json::to_string(data)
-        .context("[recall_item] serialize json err.")?;
-    Ok(result)
+    Ok(data.to_owned())
 }
-pub async fn search_item(embedding: Vec<f32>, keyword: &str, page: i64) -> Result<String> {
+pub async fn search_item(embedding: Vec<f32>, keyword: &str, page: i64) -> Result<Vec<Value>> {
     let req = json!([
         {
             "data": [embedding],
@@ -180,7 +221,5 @@ pub async fn search_item(embedding: Vec<f32>, keyword: &str, page: i64) -> Resul
             map.remove("id");
         }
     }
-    let result = serde_json::to_string(data)
-        .context("[search_item] serialize json err.")?;
-    Ok(result)
+    Ok(data.to_owned())
 }

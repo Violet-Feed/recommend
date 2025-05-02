@@ -15,8 +15,8 @@ use recommend::recommend_service_server::{RecommendService, RecommendServiceServ
 use recommend::{RecommendRequest, RecommendResponse};
 use recommend::{SearchRequest, SearchResponse};
 use tonic::{transport::Server, Request, Response, Status};
-use crate::handler::recommend_handler::handle_recommend_request;
-use crate::handler::search_handler::handle_search_request;
+use handler::recommend_handler::handle_recommend_request;
+use handler::search_handler::handle_search_request;
 
 #[derive(Debug, Default)]
 pub struct MyRecommendService {}

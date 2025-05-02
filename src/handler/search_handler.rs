@@ -10,12 +10,14 @@ pub async fn handle_search_request(req: SearchRequest) -> Result<String> {
         .context("[handle_search_request] call_multi_embedding_model err.")?;
     let results=search_item(embedding, &req.keyword, req.page).await
         .context("[handle_search_request] search_item err.")?;
+    let result= serde_json::to_string(&results)
+        .context("[handle_search_request] serialize json err.")?;
     tokio::spawn(async move {
         if let Err(e) = report_keyword(&req.namespace, &req.keyword).await {
             tracing::error!("[handle_search_request] report_keywords err: {:?}", e);
         }
     });
-    Ok(results)
+    Ok(result)
 }
 
 async fn report_keyword(namespace: &str, keyword: &str) -> Result<()> {
