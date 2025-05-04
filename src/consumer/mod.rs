@@ -1,5 +1,5 @@
 use crate::handler::embedding_handler::handle_embedding_report;
-use crate::handler::behavior_handler::handle_behavior_report;
+use crate::handler::hotspot_handler::handle_hotspot_report;
 use crate::recommend::ReportMessage;
 use crate::recommend::ReportType::*;
 use rocketmq::conf::LoggingFormat::Json;
@@ -39,9 +39,9 @@ pub async fn start() -> ! {
                                     continue;
                                 }
                             }
-                            x if x == Behavior as i32 => {
-                                if let Err(e) = handle_behavior_report(&report.namespace,report.behavior_report.unwrap_or_default()).await {
-                                    tracing::error!("[start] handle_behavior_report err. err = {:?}", e);
+                            x if x == HotSpot as i32 => {
+                                if let Err(e) = handle_hotspot_report(&report.namespace,report.hotspot_report.unwrap_or_default()).await {
+                                    tracing::error!("[start] handle_hotspot_report err. err = {:?}", e);
                                     continue;
                                 }
                             }

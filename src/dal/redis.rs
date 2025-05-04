@@ -18,7 +18,8 @@ pub async fn get_user_history(user_id:i64) -> Result<Vec<i64>> {
     let mut con = get_redis_client().await.get()
         .context("[get_user_history] Failed to get redis client")?;
     let key = format!("item_history:{}", user_id);
-    let history: Vec<(String, f64)> = con.zrevrange_withscores(key, 0, 4)?;
+    let history: Vec<(String, f64)> = con.zrevrange_withscores(key, 0, 4)
+        .context("[get_user_history] redis zrevrange_withscores err.")?;
     let history_id: Vec<i64> = history
         .iter()
         .filter_map(|(id, _)| id.parse::<i64>().ok())

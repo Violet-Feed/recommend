@@ -1,14 +1,13 @@
-use crate::dal::model::call_multi_embedding_model;
+use crate::dal::{milvus, model};
 use crate::recommend::{EmbeddingReport};
 use anyhow::{Context, Result};
-use crate::dal::milvus::upsert_item;
 
 pub async fn handle_embedding_report(namespace:&str, report: EmbeddingReport) -> Result<()> {
     match namespace {
         "item" => {
-            let embedding = call_multi_embedding_model(&report.texts, &report.images,&report.videos).await
+            let embedding = model::call_multi_embedding_model(&report.texts, &report.images,&report.videos).await
                 .context("[handle_embedding_report] call_multi_embedding_model err.")?;
-            upsert_item(&report.extra, embedding).await
+            milvus::upsert_item(&report.extra, embedding).await
                 .context("[handle_embedding_report] upsert_item err.")?;
         }
         _ => {

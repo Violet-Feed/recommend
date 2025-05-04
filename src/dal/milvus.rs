@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use milvus::client::Client;
 use milvus::collection::{Collection, SearchOption, SearchResult};
 use milvus::data::FieldColumn;
@@ -19,22 +19,25 @@ async fn get_event_collection() -> &'static Collection {
 }
 
 pub fn random_embedding() -> Vec<f32> {
-    let mut rng = rand::thread_rng();
-    (0..1024).map(|_| rng.gen_range(-0.05..0.05)).collect()
+    let mut rng = rand::rng();
+    (0..1024).map(|_| rng.random_range(-0.05..0.05)).collect()
 }
 
 pub async fn insert_event(event_name: &str, embedding_data: Vec<f32>) -> Result<()> {
     let collection = get_event_collection().await;
     let event_name_column = FieldColumn::new(collection.schema().get_field("event_name").unwrap(), vec![event_name.to_string()], );
     let event_embedding_column = FieldColumn::new(collection.schema().get_field("event_embedding").unwrap(), embedding_data);
-    collection.insert(vec![event_embedding_column, event_name_column], None).await?;
-    collection.flush().await?;
+    collection.insert(vec![event_embedding_column, event_name_column], None).await
+        .context("[insert_event] collection insert err.")?;
+    collection.flush().await
+        .context("[insert_event] collection flush err.")?;
     Ok(())
 }
 pub async fn recall_event<'a>(embedding: Vec<f32>) -> Result<Option<SearchResult<'a>>> {
     let collection = get_event_collection().await;
     let options = SearchOption::default();
-    let results = collection.search(vec![embedding.into()], "event_embedding", 1, IP, vec!["event_name"], &options, ).await?;
+    let results = collection.search(vec![embedding.into()], "event_embedding", 1, IP, vec!["event_name"], &options, ).await
+        .context("[recall_event] collection search err.")?;
     Ok(results.into_iter().next())
 }
 
@@ -51,15 +54,16 @@ pub async fn upsert_item(extra: &str, embedding_data: Vec<f32>) -> Result<()> {
         "collectionName": "item"
     });
     let client = reqwest::Client::new();
-    let resp = client
+    let response = client
         .post("http://localhost:19530/v2/vectordb/entities/upsert")
         .json(&body)
         .send()
         .await
         .context("[upsert_item] send request err.")?;
-    let text = resp.text().await
-        .context("[upsert_item] get response err.")?;
-    tracing::info!("[upsert_item] {}", text);
+
+    let result = response.json::<Value>().await
+        .context("[upsert_item] resp parse json err.")?;
+    tracing::info!("[upsert_item] {}", result);
     Ok(())
 }
 pub async fn get_item_embedding(ids: Vec<i64>) -> Result<Vec<Vec<f32>>> {
@@ -70,21 +74,19 @@ pub async fn get_item_embedding(ids: Vec<i64>) -> Result<Vec<Vec<f32>>> {
     });
 
     let client = reqwest::Client::new();
-    let resp = client
+    let response = client
         .post("http://localhost:19530/v2/vectordb/entities/get")
         .json(&body)
         .send()
         .await
         .context("[get_item_embedding] send request err.")?;
 
-    let text = resp.text().await
-        .context("[get_item_embedding] get response err.")?;
-    let v: Value = serde_json::from_str(&text)
-        .context("[get_item_embedding] parse json err.")?;
+    let result = response.json::<Value>().await
+        .context("[get_item_embedding] resp parse json err.")?;
 
-    let data = v.get("data")
+    let data = result.get("data")
         .and_then(|d| d.as_array())
-        .ok_or_else(|| anyhow::anyhow!("no data field"))?;
+        .ok_or_else(|| anyhow!("no data field"))?;
 
     let mut embeddings = Vec::new();
     for obj in data {
@@ -134,21 +136,20 @@ pub async fn recall_item(embeddings: Vec<Vec<f32>>,step:i64) -> Result<Vec<Value
     });
 
     let client = reqwest::Client::new();
-    let resp = client
+    let response = client
         .post("http://localhost:19530/v2/vectordb/entities/advanced_search")
         .json(&body)
         .send()
         .await
         .context("[recall_item] send request err.")?;
-    let text = resp.text().await
-        .context("[recall_item] get response err.")?;
-    tracing::info!("[recall_item] {}", text);
 
-    let mut v: Value = serde_json::from_str(&text)
-        .context("[recall_item] serialize json err.")?;
-    let data = v.get_mut("data")
+    let mut result = response.json::<Value>().await
+        .context("[recall_item] resp parse json err.")?;
+    tracing::info!("[recall_item] {}", result);
+
+    let data = result.get_mut("data")
         .and_then(|d| d.as_array_mut())
-        .ok_or_else(|| anyhow::anyhow!("no data field"))?;
+        .ok_or_else(|| anyhow!("no data field"))?;
     for obj in data.iter_mut() {
         if let Some(map) = obj.as_object_mut() {
             map.remove("distance");
@@ -200,21 +201,20 @@ pub async fn search_item(embedding: Vec<f32>, keyword: &str, page: i64) -> Resul
     });
 
     let client = reqwest::Client::new();
-    let resp = client
+    let response = client
         .post("http://localhost:19530/v2/vectordb/entities/advanced_search")
         .json(&body)
         .send()
         .await
         .context("[search_item] send request err.")?;
-    let text = resp.text().await
-        .context("[search_item] get response err.")?;
-    tracing::info!("[search_item] {}", text);
 
-    let mut v: Value = serde_json::from_str(&text)
-        .context("[search_item] serialize json err.")?;
-    let data = v.get_mut("data")
+    let mut result = response.json::<Value>().await
+        .context("[search_item] resp parse json err.")?;
+    tracing::info!("[search_item] {}", result);
+
+    let data = result.get_mut("data")
         .and_then(|d| d.as_array_mut())
-        .ok_or_else(|| anyhow::anyhow!("no data field"))?;
+        .ok_or_else(|| anyhow!("no data field"))?;
     for obj in data.iter_mut() {
         if let Some(map) = obj.as_object_mut() {
             map.remove("distance");

@@ -78,6 +78,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_max_level(tracing::Level::INFO)
         .init();
 
+    sentinel_core::init_default().expect("Failed to initialize Sentinel");
+
     tokio::spawn(async move {
         consumer::start().await;
     });

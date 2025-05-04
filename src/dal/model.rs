@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde_json::{json, Value};
 use std::env;
 
@@ -32,13 +32,16 @@ pub async fn call_multi_embedding_model(texts: &Vec<String>, images: &Vec<String
         .header("Content-Type", "application/json")
         .json(&request_body)
         .send()
-        .await?;
-    let result = response.json::<Value>().await?;
-    let embedding: Vec<f32> = serde_json::from_value(result["output"]["embeddings"][0]["embedding"].clone()).unwrap_or_default();
+        .await
+        .context("[call_multi_embedding_model] send request err.")?;
+
+    let result = response.json::<Value>().await
+        .context("[call_multi_embedding_model] resp parse json err.")?;
+    let embedding: Vec<f32> = serde_json::from_value(result["output"]["embeddings"][0]["embedding"].clone())?;
     Ok(embedding)
 }
 
-pub async fn call_event_embedding_model(event: &str) -> Result<Vec<f32>> {
+pub async fn call_text_embedding_model(event: &str) -> Result<Vec<f32>> {
     let api_key = env::var("DASHSCOPE_API_KEY")?;
     let client = reqwest::Client::new();
 
@@ -60,10 +63,12 @@ pub async fn call_event_embedding_model(event: &str) -> Result<Vec<f32>> {
         .header("Content-Type", "application/json")
         .json(&request_body)
         .send()
-        .await?;
+        .await
+        .context("[call_text_embedding_model] send request err.")?;
 
-    let result = response.json::<Value>().await?;
-    let embedding: Vec<f32> = serde_json::from_value(result["output"]["embeddings"][0]["embedding"].clone()).unwrap_or_default();
+    let result = response.json::<Value>().await
+        .context("[call_text_embedding_model] resp parse json err.")?;
+    let embedding: Vec<f32> = serde_json::from_value(result["output"]["embeddings"][0]["embedding"].clone())?;
     Ok(embedding)
 }
 
@@ -88,9 +93,11 @@ pub async fn call_event_model(keyword: &str) -> Result<String> {
         .header("Content-Type", "application/json")
         .json(&request_body)
         .send()
-        .await?;
+        .await
+        .context("[call_event_model] send request err.")?;
 
-    let result = response.json::<Value>().await?;
+    let result = response.json::<Value>().await
+        .context("[call_event_model] resp parse json err.")?;
     let content = result["choices"][0]["message"]["content"].as_str().unwrap_or("null");
     let event = if content.len() >= 2 && content.starts_with('"') && content.ends_with('"') {
         &content[1..content.len() - 1]

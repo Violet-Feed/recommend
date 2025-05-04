@@ -26,6 +26,6 @@ pub async fn handle_recommend_request(req:RecommendRequest) -> Result<String> {
     redis::write_impression(req.user_id,results.clone()).await
         .context("[handle_recommend_request] write_impression err.")?;
     let result = serde_json::to_string(&results)
-        .context("[search_item] serialize json err.")?;
+        .context("[handle_recommend_request] serialize json err.")?;
     Ok(result)
 }
