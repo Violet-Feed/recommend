@@ -81,8 +81,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     sentinel_core::init_default().expect("Failed to initialize Sentinel");
 
     tokio::spawn(async move {
-        consumer::start().await;
+        consumer::start_rocketmq().await;
     });
+    // tokio::spawn(async move {
+    //     consumer::start_kafka().await;
+    // });
 
     let addr = "127.0.0.1:3006".parse()?;
     let recommend_service = MyRecommendService::default();

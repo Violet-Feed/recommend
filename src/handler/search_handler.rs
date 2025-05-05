@@ -1,4 +1,4 @@
-use crate::dal::{milvus as milvus2, model};
+use crate::dal::{kafka, milvus as milvus2, model};
 use crate::recommend::SearchRequest;
 use anyhow::{Context, Result};
 use milvus::value::ValueVec;
@@ -33,9 +33,11 @@ async fn report_keyword(namespace: &str, keyword: &str) -> Result<()> {
         if is_exist {
             if let Some(ValueVec::String(event_name)) = result.field.first().map(|c| &c.value) {
                 if let Some(exist_event) = event_name.get(0).cloned() {
+                    // kafka::send_to_flink(namespace, &event).await
+                    //     .context("[report_keyword] send_to_flink err.")?;
                     hotspot::detect_hotspot(namespace, &exist_event).await
                         .context("[report_keyword] detect_hotspot err.")?;
-                    tracing::info!("[report_keyword] commit_hotspot exist event = {}", exist_event);
+                    tracing::info!("[report_keyword] report exist event = {}", exist_event);
                     return Ok(());
                 }
             }
@@ -43,8 +45,10 @@ async fn report_keyword(namespace: &str, keyword: &str) -> Result<()> {
     }
     milvus2::insert_event(&event, embedding).await
         .context("[report_keyword] insert_event err.")?;
+    // kafka::send_to_flink(namespace, &event).await
+    //     .context("[report_keyword] send_to_flink err.")?;
     hotspot::detect_hotspot(namespace, &event).await
         .context("[report_keyword] detect_hotspot err.")?;
-    tracing::info!("[report_keyword] commit_hotspot new event = {}", event);
+    tracing::info!("[report_keyword] report new event = {}", event);
     Ok(())
 }

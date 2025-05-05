@@ -1,7 +1,8 @@
 use r2d2::Pool;
-use redis::{Client, Commands};
+use redis::{Client, Commands, SetOptions};
 use tokio::sync::OnceCell;
 use anyhow::{Context, Result};
+use redis::SetExpiry::EX;
 use serde_json::Value;
 
 static REDIS_CLIENT: OnceCell<Pool<Client>> = OnceCell::const_new();
@@ -61,4 +62,22 @@ pub async fn execute_impression(user_id:i64,items:Vec<Value>) -> Result<Vec<Valu
         }
     }
     Ok(filter_items)
+}
+
+pub async fn set_hotspot(namespace:&str, key:&str) -> Result<()> {
+    let mut con = get_redis_client().await.get()
+        .context("[set_hotspot] Failed to get redis client")?;
+    let key = format!("hotspot:{}:{}", namespace,key);
+    let _: () = con.set_options(key, 1, SetOptions::default().with_expiration(EX(3600)))
+        .context("[set_hotspot] redis set err.")?;
+    Ok(())
+}
+
+pub async fn set_topk(namespace:&str,topk:&str) -> Result<()> {
+    let mut con = get_redis_client().await.get()
+        .context("[set_topk] Failed to get redis client")?;
+    let key = format!("topk:{}", namespace);
+    let _: () = con.set(key, topk)
+        .context("[set_topk] redis set err.")?;
+    Ok(())
 }

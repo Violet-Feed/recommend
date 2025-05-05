@@ -3,11 +3,12 @@ use std::cmp::Reverse;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::cmp::Ordering;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use sentinel_core::{base, flow, EntryBuilder};
 use dashmap::DashMap;
 use tokio::sync::{Mutex, OnceCell};
 use tokio::time::{interval, Duration};
+use crate::dal::redis;
 
 #[derive(Clone, Eq, PartialEq)]
 struct Hotspot {
@@ -35,7 +36,6 @@ impl HotspotManager {
             set: HashSet::new(),
             heap: BinaryHeap::new(),
         }));
-
         let manager_clone = manager.clone();
         tokio::spawn(async move {
             let mut ticker = interval(Duration::from_secs(60));
@@ -45,7 +45,6 @@ impl HotspotManager {
                 guard.auto_remove();
             }
         });
-
         manager
     }
 
@@ -61,7 +60,6 @@ impl HotspotManager {
     fn auto_remove(&mut self) {
         let now = now_ts();
         let expire_ts = now - 3600;
-
         loop {
             let need_remove = if let Some(Reverse(hotspot)) = self.heap.peek() {
                 hotspot.timestamp <= expire_ts
@@ -92,10 +90,12 @@ fn now_ts() -> i64 {
 pub async fn detect_hotspot(namespace: &str, key: &str) -> Result<()> {
     let resource = format!("{}:{}", namespace, key);
     flow::append_rule(Arc::new(flow::Rule {
+        id: resource.clone(),
         resource: resource.clone(),
-        threshold: 10.0,
+        threshold: 2.0,
         calculate_strategy: flow::CalculateStrategy::Direct,
         control_strategy: flow::ControlStrategy::Reject,
+        stat_interval_ms: 600000,
         ..Default::default()
     }));
 
@@ -119,8 +119,10 @@ pub async fn detect_hotspot(namespace: &str, key: &str) -> Result<()> {
         };
         if !guard.contains(&hotspot) {
             guard.insert(hotspot);
-            //TODO:push
-            tracing::info!("[detect_hotspot] namespace = {}, key = {}", namespace, key);
+            //TODO:push by grpc streaming
+            redis::set_hotspot(namespace, key).await
+                .context("[detect_hotspot] redis set err.")?;
+            tracing::info!("[detect_hotspot] new hotspot. namespace = {}, key = {}", namespace, key);
         }
     }
     Ok(())
