@@ -14,17 +14,19 @@ pub async fn handle_recommend_request(req:RecommendRequest) -> Result<String> {
     let mut step =0;
     while results.len()<20{
         step+=1;
-        results=milvus::recall_item(embeddings.clone(),step).await
+        let mut new_results =milvus::recall_item(embeddings.clone(), step).await
             .context("[handle_recommend_request] recall_item err.")?;
-        if results.len() == 0 {
+        new_results.retain(|item| !results.contains(item));
+        if new_results.len() == 0 {
             break;
         }
-        results=redis::execute_impression(req.user_id,results).await
-            .context("[handle_recommend_request] execute_impression err.")?;
+        // new_results=redis::execute_impression(req.user_id,new_results).await
+        //     .context("[handle_recommend_request] execute_impression err.")?;
+        results.append(&mut new_results);
     }
     results.truncate(20);
-    redis::write_impression(req.user_id,results.clone()).await
-        .context("[handle_recommend_request] write_impression err.")?;
+    // redis::write_impression(req.user_id,results.clone()).await
+    //     .context("[handle_recommend_request] write_impression err.")?;
     let result = serde_json::to_string(&results)
         .context("[handle_recommend_request] serialize json err.")?;
     Ok(result)
